@@ -16,3 +16,29 @@ def compute_grid(X, min_x, max_x, min_y, max_y, min_z, max_z, cell_size=0.1, pad
     X, Y, Z = np.meshgrid(x, y, z, indexing='ij')  # 'ij' indexing for proper order
     return X, Y, Z
 
+def compute_gradient_per_vertex(points, X, N, sigma=50.0):
+    V = np.zeros((len(points), 3))
+    for i in range(len(points)):
+        for j in range(len(X)):
+            weight = (np.exp(-np.linalg.norm(points[i] - X[j])**2 / (2 * np.pi * sigma**2)))
+            V[i] += weight * N[j]
+    return V
+
+def compute_gradient_per_tet(nodes, elems, V):
+    F = np.zeros((len(elems), 3))
+    for i, t in enumerate(elems):
+        # Get the indices of the vertices of the tet
+        v0, v1, v2, v3 = t
+
+        # Get the vertex gradients
+        grad0 = V[v0]
+        grad1 = V[v1]
+        grad2 = V[v2]
+        grad3 = V[v3]
+
+        # Compute the barycentric interpolation (uniform averaging)
+        face_gradient = (grad0 + grad1 + grad2 + grad3) / 4.0
+
+        # Store the face gradient
+        F[i] = face_gradient
+    return F
