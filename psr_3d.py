@@ -42,3 +42,26 @@ def compute_gradient_per_tet(nodes, elems, V):
         # Store the face gradient
         F[i] = face_gradient
     return F
+
+# Compute the volume of each tetrahedron using the determinant method
+def compute_tetrahedron_volume(v0, v1, v2, v3):
+    matrix = np.column_stack((v1 - v0, v2 - v0, v3 - v0))
+    det = np.linalg.det(matrix)
+    volume = abs(det) / 6.0
+    return volume
+
+# Compute the simplex-wise mass matrix for a 3D tetrahedral mesh.
+def compute_mass_matrix(points, simplices):
+    # Extract vertex positions for each simplex
+    v0, v1, v2, v3 = points[simplices[:, 0]], points[simplices[:, 1]], points[simplices[:, 2]], points[simplices[:, 3]]
+
+    # Compute volumes for all tetrahedra
+    volumes = np.array([compute_tetrahedron_volume(v0[i], v1[i], v2[i], v3[i]) for i in range(len(simplices))])
+
+    print(f'Volumes: {volumes.shape}')
+    print(f"Number of degenerate tetrahedra: {np.sum(volumes <= 1e-12)}")
+    
+    # Create the diagonal mass matrix
+    mass_matrix = np.diag(volumes)
+
+    return mass_matrix

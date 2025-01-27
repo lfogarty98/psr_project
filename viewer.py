@@ -1,6 +1,7 @@
 import polyscope as ps
-from igl import bounding_box, read_off
+from igl import bounding_box, read_off, grad, loop, crouzeix_raviart_cotmatrix
 import tetgen
+import scipy.sparse as sp
 from psr_3d import *
 
 # Read data
@@ -9,11 +10,9 @@ X, _, N = read_off("data/cat.off")
 # Compute bounding box as triangle mesh
 v_bbox, f_bbox = bounding_box(X, pad=500.0)
 
-# Refine bounding box mesh by subdivision (loop)
-from igl import loop
-v_refined, f_refined = loop(v_bbox, f_bbox, 3)
-
 # Create tetrahedralization
+# TODO: do refinement by background mesh (see TetGen)
+v_refined, f_refined = loop(v_bbox, f_bbox, 3) # Refine bounding box mesh by subdivision (loop)
 tgen = tetgen.TetGen(v_refined, f_refined)
 nodes, elems = tgen.tetrahedralize()
 
@@ -22,7 +21,15 @@ V_vertex = compute_gradient_per_vertex(nodes, X, N)
 
 # Compute gradient per tetrahedron
 V_tet = compute_gradient_per_tet(nodes, elems, V_vertex)
+
+# Solve the Poisson equation
+G = grad(nodes, elems)
+M = compute_mass_matrix(nodes, elems)
+M_g = sp.block_diag([M, M, M]) # "stretch" mass matrix from (m, m) to (3m, 3m) for x, y and z components in G matrix
+# TODO: Check if this is the correct cotangent matrix
+L, _, _ = crouzeix_raviart_cotmatrix(nodes, elems)
 breakpoint()
+
 # Initialize polyscope
 ps.init()
 
