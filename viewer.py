@@ -1,5 +1,5 @@
 import polyscope as ps
-from igl import bounding_box, read_off, grad, loop, crouzeix_raviart_cotmatrix
+from igl import bounding_box, read_off, grad, loop
 import tetgen
 import scipy.sparse as sp
 from psr_3d import *
@@ -22,19 +22,20 @@ V_vertex = compute_gradient_per_vertex(nodes, X, N)
 # Compute gradient per tetrahedron
 V_tet = compute_gradient_per_tet(nodes, elems, V_vertex)
 
-# Solve the Poisson equation
+# Define the Poisson problem Lc = D
 G = grad(nodes, elems)
 M = compute_mass_matrix(nodes, elems)
 M_g = sp.block_diag([M, M, M]) # "stretch" mass matrix from (m, m) to (3m, 3m) for x, y and z components in G matrix
-# TODO: Check if this is the correct cotangent matrix
-L, _, _ = crouzeix_raviart_cotmatrix(nodes, elems)
+L = G.T @ M_g @ G
+D = G.T @ M_g @ V_tet.T.flatten()
+coeffs = sp.linalg.spsolve(L, D) 
 breakpoint()
 
 # Initialize polyscope
 ps.init()
 
 ### Register a point cloud
-ps.register_point_cloud("points", X)
+pc = ps.register_point_cloud("points", X)
 
 ### Register meshes
 ps.register_surface_mesh("bbox", v_bbox, f_bbox, smooth_shade=True)
@@ -42,12 +43,13 @@ ps.register_surface_mesh("triangulation", v_refined, f_refined, smooth_shade=Tru
 ps_vol = ps.register_volume_mesh("volume mesh", nodes, tets=elems)
 
 # Add scalar and vector functions
-ps.get_point_cloud("points").add_vector_quantity("normals", 
+pc.add_vector_quantity("normals", 
         N, color=(0.2, 0.5, 0.5))
-ps.get_volume_mesh("volume mesh").add_vector_quantity("V_vertex", V_vertex,
+ps_vol.add_vector_quantity("V_vertex", V_vertex,
         defined_on='vertices', enabled=False)
-ps.get_volume_mesh("volume mesh").add_vector_quantity("V_tet", V_tet,
+ps_vol.add_vector_quantity("V_tet", V_tet,
         defined_on='cells', enabled=False)
+ps_vol.add_scalar_quantity("c", c, enabled=False)
 
 # View the point cloud and mesh we just registered in the 3D UI
 ps.show()
