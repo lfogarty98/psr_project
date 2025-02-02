@@ -7,8 +7,11 @@ from psr_3d import *
 # Read data
 X, _, N = read_off("data/cat.off")
 
+# Normalize point data 
+X = normalize_to_origin(X) # NOTE: may need to tune sigma parameter for compute_gradient_per_vertex
+
 # Compute bounding box as triangle mesh
-v_bbox, f_bbox = bounding_box(X, pad=500.0)
+v_bbox, f_bbox = bounding_box(X, pad=1.0)
 
 # Create tetrahedralization
 # TODO: do refinement by background mesh (see TetGen)
@@ -17,7 +20,7 @@ tgen = tetgen.TetGen(v_refined, f_refined)
 nodes, elems = tgen.tetrahedralize()
 
 # Compute gradient per vertex
-V_vertex = compute_gradient_per_vertex(nodes, X, N)
+V_vertex = compute_gradient_per_vertex(nodes, X, N, sigma=0.1) # NOTE: sigma is a parameter that needs to be tuned
 
 # Compute gradient per tetrahedron
 V_tet = compute_gradient_per_tet(nodes, elems, V_vertex)
@@ -49,7 +52,7 @@ ps_vol.add_vector_quantity("V_vertex", V_vertex,
         defined_on='vertices', enabled=False)
 ps_vol.add_vector_quantity("V_tet", V_tet,
         defined_on='cells', enabled=False)
-ps_vol.add_scalar_quantity("c", c, enabled=False)
+ps_vol.add_scalar_quantity("coeffs", coeffs, enabled=False)
 
 # View the point cloud and mesh we just registered in the 3D UI
 ps.show()

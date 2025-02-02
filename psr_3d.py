@@ -1,13 +1,31 @@
 import numpy as np
 
-def compute_bounding_box(X):
-    min_x = np.min(X[:,0])
-    max_x = np.max(X[:,0])
-    min_y = np.min(X[:,1])
-    max_y = np.max(X[:,1])
-    min_z = np.min(X[:, 2])
-    max_z = np.max(X[:, 2])
-    return min_x, max_x, min_y, max_y, min_z, max_z
+def normalize_to_origin(X):
+    """
+    Normalize 3D points so they are centered at the origin and fit within [-1,1]^3.
+    
+    :param X: (N, 3) NumPy array of 3D points
+    :return: (N, 3) NumPy array of normalized points
+    """
+    X = np.asarray(X)
+    
+    # Compute centroid (mean of points)
+    centroid = np.mean(X, axis=0)
+    
+    # Center the points
+    X_centered = X - centroid
+    
+    # Find the max absolute coordinate to scale within [-1,1]
+    max_abs = np.max(np.abs(X_centered))
+
+    if max_abs == 0:
+        return np.zeros_like(X_centered)
+
+    # Normalize to fit in the unit cube [-1,1]
+    X_normalized = X_centered / max_abs
+    
+    return X_normalized
+
 
 def compute_grid(X, min_x, max_x, min_y, max_y, min_z, max_z, cell_size=0.1, padding=0.2):
     x = np.linspace(min_x - padding, max_x + padding, int((max_x - min_x + 2 * padding) / cell_size))
@@ -16,7 +34,7 @@ def compute_grid(X, min_x, max_x, min_y, max_y, min_z, max_z, cell_size=0.1, pad
     X, Y, Z = np.meshgrid(x, y, z, indexing='ij')  # 'ij' indexing for proper order
     return X, Y, Z
 
-def compute_gradient_per_vertex(points, X, N, sigma=50.0):
+def compute_gradient_per_vertex(points, X, N, sigma=0.1):
     V = np.zeros((len(points), 3))
     for i in range(len(points)):
         for j in range(len(X)):
