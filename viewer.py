@@ -1,23 +1,16 @@
 import polyscope as ps
-from igl import bounding_box, read_off, grad, loop
-import tetgen
+from igl import read_off, grad
 import scipy.sparse as sp
 from psr_3d import *
 
 # Read data
 X, _, N = read_off("data/cat.off")
 
-# Normalize point data 
+# Normalize point data to [-1, 1]^3
 X = normalize_to_origin(X) # NOTE: may need to tune sigma parameter for compute_gradient_per_vertex
 
-# Compute bounding box as triangle mesh
-v_bbox, f_bbox = bounding_box(X, pad=1.0)
-
-# Create tetrahedralization
-# TODO: do refinement by background mesh (see TetGen)
-v_refined, f_refined = loop(v_bbox, f_bbox, 3) # Refine bounding box mesh by subdivision (loop)
-tgen = tetgen.TetGen(v_refined, f_refined)
-nodes, elems = tgen.tetrahedralize()
+# Compute tetrahedralization
+nodes, elems = naive_tetrahedralize(X)
 
 # Compute gradient per vertex
 V_vertex = compute_gradient_per_vertex(nodes, X, N, sigma=0.1) # NOTE: sigma is a parameter that needs to be tuned
@@ -32,7 +25,14 @@ M_g = sp.block_diag([M, M, M]) # "stretch" mass matrix from (m, m) to (3m, 3m) f
 L = G.T @ M_g @ G
 D = G.T @ M_g @ V_tet.T.flatten()
 coeffs = sp.linalg.spsolve(L, D) 
+
+
+# Debugging the poisson problem
+G_array = G.toarray()
+L_array = L.toarray()
 breakpoint()
+
+
 
 # Initialize polyscope
 ps.init()
@@ -41,8 +41,8 @@ ps.init()
 pc = ps.register_point_cloud("points", X)
 
 ### Register meshes
-ps.register_surface_mesh("bbox", v_bbox, f_bbox, smooth_shade=True)
-ps.register_surface_mesh("triangulation", v_refined, f_refined, smooth_shade=True)
+# ps.register_surface_mesh("bbox", v_bbox, f_bbox, smooth_shade=True)
+# ps.register_surface_mesh("triangulation", v_refined, f_refined, smooth_shade=True)
 ps_vol = ps.register_volume_mesh("volume mesh", nodes, tets=elems)
 
 # Add scalar and vector functions

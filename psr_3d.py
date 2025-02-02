@@ -1,4 +1,7 @@
 import numpy as np
+import tetgen
+from igl import loop, bounding_box
+import pyvista as pv
 
 def normalize_to_origin(X):
     """
@@ -26,6 +29,38 @@ def normalize_to_origin(X):
     
     return X_normalized
 
+# Tetrahedralization I initially used
+def naive_tetrahedralize(X):
+    """
+    Naive tetrahedralization I initially used.
+    
+    Computes a bounding box as a triangle mesh around the 3D points and refines it by subdivision.
+    This is then used for the tetrahedralization.
+    
+    :param X: (N, 3) NumPy array of 3D points
+    :return: (N, 3) NumPy array of normalized points
+    """
+    # Compute bounding box as triangle mesh
+    v_bbox, f_bbox = bounding_box(X, pad=1.0)
+
+    # Create tetrahedralization
+    # TODO: do refinement by background mesh (see TetGen)
+    v_refined, f_refined = loop(v_bbox, f_bbox, 3) # Refine bounding box mesh by subdivision (loop)
+    tgen = tetgen.TetGen(v_refined, f_refined)
+    nodes, elems = tgen.tetrahedralize()
+    return nodes, elems
+
+def tetrahedralize_sphere(radius=1.5):
+    """
+    Tetrahedralize a sphere.
+    
+    :param radius: float, radius of the sphere
+    :return: nodes, elems
+    """
+    sphere = pv.Sphere(radius=radius)
+    tet = tetgen.TetGen(sphere)
+    nodes, elems = tet.tetrahedralize(order=1, mindihedral=20, minratio=1.5)
+    return nodes, elems
 
 def compute_grid(X, min_x, max_x, min_y, max_y, min_z, max_z, cell_size=0.1, padding=0.2):
     x = np.linspace(min_x - padding, max_x + padding, int((max_x - min_x + 2 * padding) / cell_size))
