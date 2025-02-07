@@ -10,7 +10,8 @@ X, _, N = read_off("data/cat.off")
 X = normalize_to_origin(X) # NOTE: may need to tune sigma parameter for compute_gradient_per_vertex
 
 # Compute tetrahedralization
-nodes, elems = naive_tetrahedralize(X)
+nodes, elems = tetrahedralize_regular_grid(res=15)
+print(f'nodes: {nodes.shape}, elems: {elems.shape}')
 
 # Compute gradient per vertex
 V_vertex = compute_gradient_per_vertex(nodes, X, N, sigma=0.1) # NOTE: sigma is a parameter that needs to be tuned
@@ -26,12 +27,10 @@ L = G.T @ M_g @ G
 D = G.T @ M_g @ V_tet.T.flatten()
 coeffs = sp.linalg.spsolve(L, D) 
 
-
 # Debugging the poisson problem
 G_array = G.toarray()
 L_array = L.toarray()
 breakpoint()
-
 
 
 # Initialize polyscope

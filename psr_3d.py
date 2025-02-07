@@ -2,6 +2,8 @@ import numpy as np
 import tetgen
 from igl import loop, bounding_box
 import pyvista as pv
+from scipy.spatial import Delaunay
+
 
 def normalize_to_origin(X):
     """
@@ -28,6 +30,20 @@ def normalize_to_origin(X):
     X_normalized = X_centered / max_abs
     
     return X_normalized
+
+def tetrahedralize_regular_grid(res=30, padding=0.1):
+    """
+    Tetrahedralize a regular grid.
+    Uses scipy.spatial.Delaunay to compute the tetrahedralization.
+    
+    :param res: int, resolution of the grid
+    :return: nodes, elems
+    """
+    xs = np.linspace(-1. - padding, 1. + padding, res)
+    X = np.array(np.meshgrid(xs, xs, xs)).transpose(1, 2, 3, 0).reshape(-1, 3)
+    tet = Delaunay(X, qhull_options='Qbb Qc Qz Q12 Q0') # add Qhull options to avoid degenerate tets (see https://github.com/scipy/scipy/issues/16094)
+    nodes, elems = tet.points, tet.simplices
+    return nodes, elems
 
 # Tetrahedralization I initially used
 def naive_tetrahedralize(X):
