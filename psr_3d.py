@@ -3,6 +3,7 @@ import tetgen
 from igl import loop, bounding_box
 import pyvista as pv
 from scipy.spatial import Delaunay
+import gpytoolbox as gpy
 
 
 def normalize_to_origin(X):
@@ -30,6 +31,62 @@ def normalize_to_origin(X):
     X_normalized = X_centered / max_abs
     
     return X_normalized
+
+def generate_background_mesh(bounds, resolution=20, eps=1e-6):
+    """_summary_
+    Generate a background mesh with desired resolution.
+    Copied from TetGen docs https://tetgen.pyvista.org/
+
+    Args:
+        bounds (_type_): _description_
+        resolution (int, optional): _description_. Defaults to 20.
+        eps (_type_, optional): _description_. Defaults to 1e-6.
+
+    Returns:
+        _type_: _description_
+    """
+    x_min, x_max, y_min, y_max, z_min, z_max = bounds
+    grid_x, grid_y, grid_z = np.meshgrid(
+        np.linspace(x_min - eps, x_max + eps, resolution),
+        np.linspace(y_min - eps, y_max + eps, resolution),
+        np.linspace(z_min - eps, z_max + eps, resolution),
+        indexing="ij",
+    )
+    return pv.StructuredGrid(grid_x, grid_y, grid_z).triangulate()
+
+def naive_sizing_function(points, focus_point=np.array([0, 0, 0]), max_size=1.0, min_size=0.2):
+    distances = 1 / (np.linalg.norm(points - focus_point, axis=1) + 1e-16)
+    return np.clip(max_size - distances, min_size, max_size)
+
+def sizing_function_gaussian(points, X, sigma=0.1):
+    sd = gpy.squared_distance(points, X, use_cpp=True)
+    sizing_field = np.exp(-sd[0]/ sigma/sigma)
+    return sizing_field
+
+def tetrahedralize_sizing_field(X):
+    
+    # Load or create your PLC
+    sphere = pv.Sphere(radius=1.5, center=(0, 0, 0))
+    
+    # Create a background mesh
+    bounds = sphere.bounds
+    print(f'Background mesh bounds: {bounds}')
+    bg_mesh = generate_background_mesh(bounds, resolution=10, eps=1e-6)
+    
+    # Compute sizing field
+    sizing_field = naive_sizing_function(bg_mesh.points)
+    bg_mesh.point_data['target_size'] = sizing_field
+    
+    
+    # Create refined mesh
+    tet_kwargs = dict(order=1, mindihedral=20, minratio=1.5)
+    breakpoint()
+    tet = tetgen.TetGen(sphere)
+    
+    nodes, elems = tet.tetrahedralize(bgmesh=bg_mesh, **tet_kwargs) ## 
+    
+    return nodes, elems, bg_mesh
+    
 
 def tetrahedralize_regular_grid(res=30, padding=0.1):
     """
@@ -134,3 +191,12 @@ def compute_mass_matrix(points, simplices):
     mass_matrix = np.diag(volumes)
 
     return mass_matrix
+
+def compute_isovalue(coeffs, nodes, X, sigma=0.1):
+    isovalue = 0.0
+    for point_sample in X:
+        for i, node in enumerate(nodes):
+            weight = (np.exp(-np.linalg.norm(point_sample - node)**2 / (2 * np.pi * sigma**2)))
+            isovalue += weight * coeffs[i]
+        isovalue /= len(nodes)
+    return isovalue/len(X)
