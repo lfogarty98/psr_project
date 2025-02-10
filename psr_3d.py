@@ -58,37 +58,45 @@ def naive_sizing_function(points, focus_point=np.array([0, 0, 0]), max_size=1.0,
     distances = 1 / (np.linalg.norm(points - focus_point, axis=1) + 1e-16)
     return np.clip(max_size - distances, min_size, max_size)
 
-def sizing_function_gaussian(points, X, sigma=0.1):
+def sizing_function_gaussian(points, X, sigma=0.1, max_size=1.5, min_size=0.15):
     sd = gpy.squared_distance(points, X, use_cpp=True)
-    sizing_field = np.exp(-sd[0]/ sigma/sigma)
-    return sizing_field
+    sizing_field = np.exp(-sd[0]/sigma**2)
+    # # Normalize to range [min_size, max_size]
+    # min_val, max_val = np.min(sizing_field), np.max(sizing_field)
+    
+    # if max_val > min_val:  # Avoid division by zero
+    #     sizing_field = (sizing_field - min_val) / (max_val - min_val)  # Normalize to [0,1]
+    #     sizing_field = sizing_field * (max_size - min_size) + min_size  # Scale to [min_size, max_size]
+    # else:
+    #     sizing_field = np.full_like(sizing_field, min_size)  # If no variation, set everything to min_size
+    
+    # return sizing_field
+    return np.clip(sizing_field, min_size, max_size)
 
 def tetrahedralize_sizing_field(X):
     
-    # Load or create your PLC
-    sphere = pv.Sphere(radius=1.5, center=(0, 0, 0))
+    # Generate a box-shaped triangle mesh
+    bounds = (-1.5, 1.5, -1.5, 1.5, -1.5, 1.5)
+    box = pv.Box(bounds=bounds,level=5, quads=False)
     
-    # Create a background mesh
-    bounds = sphere.bounds
-    print(f'Background mesh bounds: {bounds}')
-    bg_mesh = generate_background_mesh(bounds, resolution=10, eps=1e-6)
+    # Create the tetrahedral background mesh
+    print(f'Background mesh bounds: {box.bounds}')
+    bg_mesh = generate_background_mesh(bounds, resolution=30, eps=1e-6)
     
     # Compute sizing field
-    sizing_field = naive_sizing_function(bg_mesh.points)
+    # sizing_field = naive_sizing_function(bg_mesh.points)
+    sizing_field = sizing_function_gaussian(bg_mesh.points, X, sigma=0.1)
     bg_mesh.point_data['target_size'] = sizing_field
-    
     
     # Create refined mesh
     tet_kwargs = dict(order=1, mindihedral=20, minratio=1.5)
-    breakpoint()
-    tet = tetgen.TetGen(sphere)
-    
-    nodes, elems = tet.tetrahedralize(bgmesh=bg_mesh, **tet_kwargs) ## 
+    tet = tetgen.TetGen(box)
+    nodes, elems = tet.tetrahedralize(bgmesh=bg_mesh, **tet_kwargs)
     
     return nodes, elems, bg_mesh
     
 
-def tetrahedralize_regular_grid(res=30, padding=0.1):
+def tetrahedralize_regular_grid(res=10, padding=0.1):
     """
     Tetrahedralize a regular grid.
     Uses scipy.spatial.Delaunay to compute the tetrahedralization.
