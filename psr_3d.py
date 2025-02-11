@@ -58,34 +58,29 @@ def naive_sizing_function(points, focus_point=np.array([0, 0, 0]), max_size=1.0,
     distances = 1 / (np.linalg.norm(points - focus_point, axis=1) + 1e-16)
     return np.clip(max_size - distances, min_size, max_size)
 
-def sizing_function_gaussian(points, X, sigma=0.1, max_size=1.5, min_size=0.15):
+def sizing_function_gaussian(points, X, sigma=0.1, max_size=1.5, min_size=0.1):
     sd = gpy.squared_distance(points, X, use_cpp=True)
-    sizing_field = np.exp(-sd[0]/sigma**2)
-    # # Normalize to range [min_size, max_size]
-    # min_val, max_val = np.min(sizing_field), np.max(sizing_field)
-    
-    # if max_val > min_val:  # Avoid division by zero
-    #     sizing_field = (sizing_field - min_val) / (max_val - min_val)  # Normalize to [0,1]
-    #     sizing_field = sizing_field * (max_size - min_size) + min_size  # Scale to [min_size, max_size]
-    # else:
-    #     sizing_field = np.full_like(sizing_field, min_size)  # If no variation, set everything to min_size
-    
-    # return sizing_field
+    sizing_field = (1 - np.exp(-sd[0]/sigma**2))
     return np.clip(sizing_field, min_size, max_size)
 
-def tetrahedralize_sizing_field(X):
+def tetrahedralize_sizing_field(X, level=5, resolution=30, sigma=0.25):
+    """
+    Tetrahedralize a 3D point cloud with a sizing field.
+    Generates a box-shaped triangle mesh around the point samples using PyVista.
+    Adaptive mesh refinement is performed using TetGen with a background mesh.
+    """
     
     # Generate a box-shaped triangle mesh
     bounds = (-1.5, 1.5, -1.5, 1.5, -1.5, 1.5)
-    box = pv.Box(bounds=bounds,level=5, quads=False)
+    box = pv.Box(bounds=bounds,level=level, quads=False)
     
     # Create the tetrahedral background mesh
     print(f'Background mesh bounds: {box.bounds}')
-    bg_mesh = generate_background_mesh(bounds, resolution=30, eps=1e-6)
+    bg_mesh = generate_background_mesh(bounds, resolution=resolution, eps=1e-6)
     
     # Compute sizing field
     # sizing_field = naive_sizing_function(bg_mesh.points)
-    sizing_field = sizing_function_gaussian(bg_mesh.points, X, sigma=0.1)
+    sizing_field = sizing_function_gaussian(bg_mesh.points, X, sigma=sigma)
     bg_mesh.point_data['target_size'] = sizing_field
     
     # Create refined mesh
