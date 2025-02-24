@@ -1,10 +1,20 @@
 import numpy as np
 import tetgen
-from igl import loop, bounding_box
+from igl import loop, bounding_box, grad
 import pyvista as pv
 from scipy.spatial import Delaunay
 import gpytoolbox as gpy
+import scipy.sparse as sp
+from plyfile import PlyData
 
+
+def read_ply(fpath, every_ith=200):
+    plydata = PlyData.read(fpath)
+    X = np.array([plydata["vertex"][c] for c in ["z", "y", "x"]]).T
+    X[:,1] = -X[:,1]
+    N = np.array([plydata["vertex"][c] for c in ["nz", "ny", "nx"]]).T
+    N[:,1] = -N[:,1]
+    return X[::every_ith],N[::every_ith]
 
 def normalize_to_origin(X):
     """
@@ -58,7 +68,7 @@ def naive_sizing_function(points, focus_point=np.array([0, 0, 0]), max_size=1.0,
     distances = 1 / (np.linalg.norm(points - focus_point, axis=1) + 1e-16)
     return np.clip(max_size - distances, min_size, max_size)
 
-def sizing_function_gaussian(points, X, sigma=0.1, max_size=1.5, min_size=0.1):
+def sizing_function_gaussian(points, X, sigma=0.1, max_size=1.5, min_size=0.05):
     sd = gpy.squared_distance(points, X, use_cpp=True)
     sizing_field = (1 - np.exp(-sd[0]/sigma**2))
     return np.clip(sizing_field, min_size, max_size)
@@ -79,7 +89,6 @@ def tetrahedralize_sizing_field(X, level=5, resolution=30, sigma=0.25):
     bg_mesh = generate_background_mesh(bounds, resolution=resolution, eps=1e-6)
     
     # Compute sizing field
-    # sizing_field = naive_sizing_function(bg_mesh.points)
     sizing_field = sizing_function_gaussian(bg_mesh.points, X, sigma=sigma)
     bg_mesh.point_data['target_size'] = sizing_field
     
@@ -91,7 +100,7 @@ def tetrahedralize_sizing_field(X, level=5, resolution=30, sigma=0.25):
     return nodes, elems, bg_mesh
     
 
-def tetrahedralize_regular_grid(res=10, padding=0.1):
+def tetrahedralize_regular_grid_delaunay(res=10, padding=0.1):
     """
     Tetrahedralize a regular grid.
     Uses scipy.spatial.Delaunay to compute the tetrahedralization.
@@ -103,6 +112,15 @@ def tetrahedralize_regular_grid(res=10, padding=0.1):
     X = np.array(np.meshgrid(xs, xs, xs)).transpose(1, 2, 3, 0).reshape(-1, 3)
     tet = Delaunay(X, qhull_options='Qbb Qc Qz Q12 Q0') # add Qhull options to avoid degenerate tets (see https://github.com/scipy/scipy/issues/16094)
     nodes, elems = tet.points, tet.simplices
+    return nodes, elems
+
+def tetrahedralize_regular_grid(level=5):
+    # Generate a box-shaped triangle mesh
+    bounds = (-1.5, 1.5, -1.5, 1.5, -1.5, 1.5)
+    box = pv.Box(bounds=bounds,level=level, quads=False)
+    tet_kwargs = dict(order=1, mindihedral=20, minratio=1.5)
+    tet = tetgen.TetGen(box)
+    nodes, elems = tet.tetrahedralize(**tet_kwargs)
     return nodes, elems
 
 # Tetrahedralization I initially used
@@ -146,14 +164,19 @@ def compute_grid(X, min_x, max_x, min_y, max_y, min_z, max_z, cell_size=0.1, pad
     return X, Y, Z
 
 def compute_gradient_per_vertex(points, X, N, sigma=0.1):
+    """
+    Compute the target vector field V at each vertex.
+    For each vertex in the domain, the target vector field is computed by summing the sample normals N
+    weighted by a Gaussian kernel centered at the corresponding sample position.
+    """
     V = np.zeros((len(points), 3))
     for i in range(len(points)):
-        for j in range(len(X)):
-            weight = (np.exp(-np.linalg.norm(points[i] - X[j])**2 / (2 * np.pi * sigma**2)))
-            V[i] += weight * N[j]
+        weights = np.exp(-np.linalg.norm(points[i] - X, axis=1)**2 / (2 * np.pi * sigma**2))
+        # weights /= np.sum(weights)
+        V[i] = np.dot(weights, N)
     return V
 
-def compute_gradient_per_tet(nodes, elems, V):
+def compute_gradient_per_tet(elems, V):
     F = np.zeros((len(elems), 3))
     for i, t in enumerate(elems):
         # Get the indices of the vertices of the tet
@@ -172,15 +195,19 @@ def compute_gradient_per_tet(nodes, elems, V):
         F[i] = face_gradient
     return F
 
-# Compute the volume of each tetrahedron using the determinant method
 def compute_tetrahedron_volume(v0, v1, v2, v3):
+    """
+    Compute the volume of each tetrahedron using the determinant method.
+    """
     matrix = np.column_stack((v1 - v0, v2 - v0, v3 - v0))
     det = np.linalg.det(matrix)
     volume = abs(det) / 6.0
     return volume
 
-# Compute the simplex-wise mass matrix for a 3D tetrahedral mesh.
 def compute_mass_matrix(points, simplices):
+    """
+    Compute the simplex-wise mass matrix for a 3D tetrahedral mesh.
+    """
     # Extract vertex positions for each simplex
     v0, v1, v2, v3 = points[simplices[:, 0]], points[simplices[:, 1]], points[simplices[:, 2]], points[simplices[:, 3]]
 
@@ -195,11 +222,31 @@ def compute_mass_matrix(points, simplices):
 
     return mass_matrix
 
+def solve_poisson(nodes, elems, V):
+    """
+    Solve the Poisson problem Lc = D, where L = G^T M G is the Laplacian matrix, 
+    M is the mass matrix, G is the gradient matrix, c are the coefficients...
+    """
+    G = grad(nodes, elems)
+    M = compute_mass_matrix(nodes, elems)
+    M_g = sp.block_diag([M, M, M]) # "stretch" mass matrix from (m, m) to (3m, 3m) for x, y and z components in G matrix
+    L = G.T @ M_g @ G
+    D = G.T @ M_g @ V.T.flatten()
+    coeffs = sp.linalg.spsolve(L, D) 
+    return coeffs
+
 def compute_isovalue(coeffs, nodes, X, sigma=0.1):
+    """
+    Compute the isovalue of the implicit function defined by the coefficients and nodes.
+    X is the set of sample points where the implicit function is evaluated.
+    This is done by evaluating the implicit function at each sample point and averaging the results.
+    The weights are normalized so they sum to 1.
+    """
     isovalue = 0.0
-    for point_sample in X:
-        for i, node in enumerate(nodes):
-            weight = (np.exp(-np.linalg.norm(point_sample - node)**2 / (2 * np.pi * sigma**2)))
-            isovalue += weight * coeffs[i]
-        isovalue /= len(nodes)
-    return isovalue/len(X)
+
+    for point_sample in X:  # Evaluate implicit function at each sample point
+        weights = np.exp(-np.linalg.norm(nodes - point_sample, axis=1)**2 / (2 * np.pi * sigma**2))
+        weights /= np.sum(weights)  # Normalize weights to sum to 1
+        isovalue += np.dot(weights, coeffs)  # Weighted sum of coefficients
+
+    return isovalue / len(X)  # Average over sample points
