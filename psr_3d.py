@@ -68,7 +68,7 @@ def naive_sizing_function(points, focus_point=np.array([0, 0, 0]), max_size=1.0,
     distances = 1 / (np.linalg.norm(points - focus_point, axis=1) + 1e-16)
     return np.clip(max_size - distances, min_size, max_size)
 
-def sizing_function_gaussian(points, X, sigma=0.1, max_size=1.5, min_size=0.05):
+def sizing_function_gaussian(points, X, sigma=0.1, max_size=1.5, min_size=0.01):
     sd = gpy.squared_distance(points, X, use_cpp=True)
     sizing_field = (1 - np.exp(-sd[0]/sigma**2))
     return np.clip(sizing_field, min_size, max_size)
@@ -216,23 +216,33 @@ def compute_mass_matrix(points, simplices):
 
     print(f'Volumes: {volumes.shape}')
     print(f"Number of degenerate tetrahedra: {np.sum(volumes <= 1e-12)}")
-    
-    # Create the diagonal mass matrix
-    mass_matrix = np.diag(volumes)
 
+    mass_matrix = sp.diags(volumes)
     return mass_matrix
 
-def solve_poisson(nodes, elems, V):
+def solve_poisson(nodes, elems, V, solve_direct=False, tol=1e-8, max_iter=1000):
     """
     Solve the Poisson problem Lc = D, where L = G^T M G is the Laplacian matrix, 
     M is the mass matrix, G is the gradient matrix, c are the coefficients...
     """
     G = grad(nodes, elems)
     M = compute_mass_matrix(nodes, elems)
+    print(f'Mass matrix shape: {M.shape}')
     M_g = sp.block_diag([M, M, M]) # "stretch" mass matrix from (m, m) to (3m, 3m) for x, y and z components in G matrix
     L = G.T @ M_g @ G
     D = G.T @ M_g @ V.T.flatten()
-    coeffs = sp.linalg.spsolve(L, D) 
+    
+    if solve_direct: # Solve using direct solver
+        coeffs = sp.linalg.spsolve(L, D)
+    else: # Solve using Conjugate Gradient
+        # Use a Jacobi preconditioner (diagonal inverse)
+        diag_L = L.diagonal()
+        M_inv = sp.diags(1 / (diag_L + 1e-8))  # Avoid division by zero
+        coeffs, info = sp.linalg.cg(L, D, M=M_inv, maxiter=max_iter)
+        if info > 0:
+            print(f"Warning: CG did not fully converge after {info} iterations.")
+        elif info < 0:
+            raise RuntimeError("CG solver failed.")
     return coeffs
 
 def compute_isovalue(coeffs, nodes, X, sigma=0.1):
