@@ -1,6 +1,6 @@
 import numpy as np
 import tetgen
-from igl import loop, bounding_box, grad
+from igl import loop, bounding_box, grad, barycentric_coordinates_tet, barycenter
 import pyvista as pv
 from scipy.spatial import Delaunay
 import gpytoolbox as gpy
@@ -245,7 +245,7 @@ def solve_poisson(nodes, elems, V, solve_direct=False, tol=1e-8, max_iter=1000):
             raise RuntimeError("CG solver failed.")
     return coeffs
 
-def compute_isovalue(coeffs, nodes, X, sigma=0.1):
+def compute_isovalue_smoothed(coeffs, nodes, X, sigma=0.1):
     """
     Compute the isovalue of the implicit function defined by the coefficients and nodes.
     X is the set of sample points where the implicit function is evaluated.
@@ -260,3 +260,38 @@ def compute_isovalue(coeffs, nodes, X, sigma=0.1):
         isovalue += np.dot(weights, coeffs)  # Weighted sum of coefficients
 
     return isovalue / len(X)  # Average over sample points
+
+def compute_isovalue(nodes, elems, X, coeffs):
+    """
+    Compute the isovalue of the implicit function defined by the coefficients and nodes.
+    X is the set of sample points where the implicit function is evaluated.
+    This is done by computing the barycentric coordinates of each barycenter of the tetrahedra,
+    then finding the closest barycenter for each sample point and taking the interpolated scalar value.
+    The final isovalue is the average of the interpolated values over all sample points.
+    """
+    barycenters = barycenter(nodes, elems)
+    # Compute squared Euclidean distances efficiently using broadcasting
+    distances = np.linalg.norm(X[:, np.newaxis, :] - barycenters[np.newaxis, :, :], axis=2)
+
+    # Find the index of the closest barycenter for each point in X
+    closest_indices = np.argmin(distances, axis=1)
+    
+    # Corners of each tetrahedron 
+    # NOTE: igl.barycentric_coordinates_tet expects the corners to be in a specific format: https://github.com/libigl/libigl-python-bindings/issues/33
+    corners = nodes[elems] # P x 4 x 3
+    t1 = np.reshape([corners[:, 0, :]], (-1, 3))
+    t2 = np.reshape([corners[:, 1, :]], (-1, 3))
+    t3 = np.reshape([corners[:, 2, :]], (-1, 3))
+    t4 = np.reshape([corners[:, 3, :]], (-1, 3))
+    bary_coords = barycentric_coordinates_tet(
+            barycenters, 
+            t1, t2, t3, t4
+    )
+    
+    isovalue = 0.0
+    for i, point_sample in enumerate(X):
+        bary_coords_i = bary_coords[closest_indices[i]]
+        vertex_indices_i = elems[closest_indices[i]]
+        isovalue +=  bary_coords_i @ coeffs[vertex_indices_i]
+
+    return isovalue / len(X)

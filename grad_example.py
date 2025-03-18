@@ -5,9 +5,24 @@ import polyscope as ps
 v, f = igl.read_triangle_mesh("data/cheburashka.off")
 u = igl.read_dmat("data/cheburashka-scalar.dmat")
 
+m = igl.massmatrix(v, f, igl.MASSMATRIX_TYPE_VORONOI)
+
 g = igl.grad(v, f)
+breakpoint()
+
 gu = g.dot(u).reshape(f.shape, order="F")
 gu_mag = np.linalg.norm(gu, axis=1)
+
+
+
+
+
+
+
+
+
+
+
 
 # p = plot(v, f, u, shading={"wireframe":False}, return_plot=True)
 # max_size = igl.avg_edge_length(v, f) / np.mean(gu_mag)
